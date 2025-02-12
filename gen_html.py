@@ -8,15 +8,35 @@ BRACKET_PATTERN = re.compile(r"\[([^\]]+)\]")  # Convert [words] to <i>words</i>
 DOUBLE_ANGLE_PATTERN = re.compile(r"<<([^>]*)>>")  # Extract text inside << >>
 
 def format_text(text):
-    """Formats text by converting [words] to <i>words</i> and placing <<sentences>> at the end of their paragraph."""
+    """Formats text by converting [words] to <i>words</i> and ensuring <<sentences>> appear correctly."""
     special_blocks = DOUBLE_ANGLE_PATTERN.findall(text)
     text = DOUBLE_ANGLE_PATTERN.sub("", text)  # Remove <<...>> from inline text
+
+    cleaned_special_blocks = []
+    for block in special_blocks:
+        block = block.strip()
+
+        # First, detect `<<[ ... ]>>` and treat it as special text
+        if block.startswith("[") and block.endswith("]"):
+            block = block[1:-1]  # Remove outer brackets
+            formatted_block = BRACKET_PATTERN.sub(r"<i>\1</i>", block)  # Italicize internal [words]
+        else:
+            formatted_block = BRACKET_PATTERN.sub(r"<i>\1</i>", block)  # Normal processing
+
+        # If special text is the entire verse (Psalms case), treat it as a separate paragraph
+        if text.strip() == "":
+            cleaned_special_blocks.append(f'<p class="special">{formatted_block}</p>')
+        else:
+            # Keep inline if it comes at the end of a verse (Romans case)
+            cleaned_special_blocks.append(f'<span class="special">{formatted_block}</span>')
+
+    # Fully process bracketed words in the main text AFTER special blocks
     text = BRACKET_PATTERN.sub(r"<i>\1</i>", text)
 
-    # Process special text separately to remove outer brackets and italicize words inside
-    cleaned_special_blocks = [BRACKET_PATTERN.sub(r"<i>\1</i>", block.strip("[]")) for block in special_blocks]
+    # Ensure we return special text correctly formatted
+    special_text = " ".join(cleaned_special_blocks) if cleaned_special_blocks else ""
 
-    return text.strip(), cleaned_special_blocks
+    return text.strip(), special_text
 
 def load_json():
     """Loads KJV data from JSON."""
@@ -48,9 +68,10 @@ def generate_html_for_book(book_id, book_data):
             i {{ font-style: italic; }}
             .special {{ 
                 font-weight: bold; 
-                text-align: center;
-                display: inline-block; /* Keep special text inline */
-                margin-left: 10px;
+                text-align: center; 
+                display: block;  /* Make it behave like a block element */
+                width: 100%;  /* Ensure it spans the full width */
+                margin: 10px auto; /* Center with automatic margins */
             }}
         </style>
     </head>
@@ -69,20 +90,19 @@ def generate_html_for_book(book_id, book_data):
 
             formatted_text, special_blocks = format_text(text)
 
-            # Append special text at the end of its paragraph
-            if special_blocks:
-                special_text_inline = f' <span class="special">{" ".join(special_blocks)}</span>'
+            # Use special_blocks as raw HTML, prevent extra wrapping
+            special_text_inline = "".join(special_blocks)  # No extra span wrapping here!
 
             if formatted_text:
                 paragraph.append(formatted_text)
 
             if is_paragraph_break:
-                html_parts.append(f"<p>{' '.join(paragraph)}{special_text_inline}</p>\n")
+                html_parts.append(f"<p>{' '.join(paragraph)} {special_text_inline}</p>\n")
                 paragraph = []
                 special_text_inline = ""
 
         if paragraph:
-            html_parts.append(f"<p>{' '.join(paragraph)}{special_text_inline}</p>\n")
+            html_parts.append(f"<p>{' '.join(paragraph)} {special_text_inline}</p>\n")
 
     html_parts.append("</body></html>")
 
