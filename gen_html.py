@@ -3,23 +3,25 @@ import re
 
 DB_FILE = "kjv.db"
 
-# Regex pattern to convert [words] to <i>words</i>
-BRACKET_PATTERN = re.compile(r"\[([^\]]+)\]")
+# Regex patterns
+BRACKET_PATTERN = re.compile(r"\[([^\]]+)\]")  # Convert [words] to <i>words</i>
+DOUBLE_ANGLE_PATTERN = re.compile(r"<<([^>]*)>>")  # Extract text inside << >>
 
 def connect_db():
     """Connects to the SQLite database."""
     return sqlite3.connect(DB_FILE)
 
 def format_text(text):
-    """Converts [words] to <i>words</i> for HTML rendering."""
-    return BRACKET_PATTERN.sub(r"<i>\1</i>", text)
+    """Converts [words] to <i>words</i> and ensures <<sentences>> appear on separate lines without brackets."""
+    text = BRACKET_PATTERN.sub(r"<i>\1</i>", text)
+    text = DOUBLE_ANGLE_PATTERN.sub(r'<div class="special">\1</div>', text)  # Remove << and >> while keeping content
+    return text.strip()
 
 def fetch_and_generate_all_books():
     """Fetches all books from the database and generates an HTML file for each."""
     conn = connect_db()
     cursor = conn.cursor()
 
-    # Get all books ordered by ID
     cursor.execute("SELECT id, name FROM books ORDER BY id")
     books = cursor.fetchall()
 
@@ -34,8 +36,7 @@ def fetch_and_generate_all_books():
     print("All books have been generated as HTML files.")
 
 def generate_html_for_book(cursor, book_id, book_name):
-    """Fetches the entire book's text and formats it for HTML output as pure paragraphs."""
-    # Fetch all chapters
+    """Fetches the entire book's text and formats it for HTML output."""
     cursor.execute("""
         SELECT id FROM chapters 
         WHERE book_id = ? ORDER BY chapter_number
@@ -46,7 +47,6 @@ def generate_html_for_book(cursor, book_id, book_name):
         print(f"No chapters found for '{book_name}'. Skipping.")
         return
 
-    # Start building HTML content
     html_content = f"""
     <!DOCTYPE html>
     <html lang="en">
@@ -58,6 +58,7 @@ def generate_html_for_book(cursor, book_id, book_name):
             body {{ font-family: Atkinson Hyperlegible Next, sans-serif; line-height: 1.6; max-width: 800px; margin: auto; padding: 20px; }}
             p {{ margin-bottom: 10px; }}
             i {{ font-style: italic; }}
+            .special {{ display: block; text-align: center; font-weight: bold; margin: 10px 0; }}
         </style>
     </head>
     <body>
@@ -66,9 +67,7 @@ def generate_html_for_book(cursor, book_id, book_name):
 
     paragraph = []
 
-    # Process each chapter (without headings)
     for chapter_id, in chapters:
-        # Fetch verses for the chapter
         cursor.execute("""
             SELECT verse_number, text FROM verses 
             WHERE chapter_id = ? ORDER BY verse_number
@@ -76,25 +75,28 @@ def generate_html_for_book(cursor, book_id, book_name):
         
         verses = cursor.fetchall()
 
-        # Fetch paragraph breaks
         cursor.execute("""
             SELECT verse_number FROM paragraph_breaks 
             WHERE book_id = ? AND chapter_id = ?
         """, (book_id, chapter_id))
         
-        paragraph_breaks = {row[0] for row in cursor.fetchall()}  # Convert to set for quick lookup
+        paragraph_breaks = {row[0] for row in cursor.fetchall()}
 
-        # Combine verses into paragraphs
         for verse_num, text in verses:
-            formatted_text = format_text(text)  # Apply italics for bracketed words
-            paragraph.append(formatted_text)
-
-            # If a paragraph break is found, close current paragraph and start a new one
+            formatted_text = format_text(text)
+            
+            if formatted_text.startswith('<div class="special">'):
+                if paragraph:
+                    html_content += f"<p>{' '.join(paragraph)}</p>\n"
+                    paragraph = []
+                html_content += formatted_text + "\n"
+            else:
+                paragraph.append(formatted_text)
+            
             if verse_num in paragraph_breaks:
                 html_content += f"<p>{' '.join(paragraph)}</p>\n"
                 paragraph = []
 
-    # Append any remaining text as the last paragraph
     if paragraph:
         html_content += f"<p>{' '.join(paragraph)}</p>\n"
 
