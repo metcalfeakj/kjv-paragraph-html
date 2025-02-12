@@ -1,7 +1,7 @@
 import json
 import re
 
-INPUT_FILE = "kjv.json"
+INPUT_FILE = "kjv_data.json"
 
 # Regex patterns
 BRACKET_PATTERN = re.compile(r"\[([^\]]+)\]")  # Convert [words] to <i>words</i>
